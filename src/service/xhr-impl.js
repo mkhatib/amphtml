@@ -277,6 +277,7 @@ export function normalizeMethod_(method) {
  * @private
  */
 function setupJson_(init) {
+  dev().assert(init.body !== null, 'XHR body: null is an invalid value.');
   init.headers = init.headers || {};
   init.headers['Accept'] = 'application/json';
 

@@ -244,6 +244,14 @@ describe('XHR', function() {
           getResponseHeader: () => '',
         };
 
+        it('should assert body is not set to null', () => {
+          const post = xhr.fetchJson.bind(xhr, '/post', {
+            method: 'POST',
+            body: null,
+          });
+          expect(post).to.throw(/XHR body: null is an invalid value/);
+        });
+
         it('should resolve if success', () => {
           mockXhr.status = 200;
           return assertSuccess(createResponseInstance('', mockXhr))
