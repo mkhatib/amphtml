@@ -21,7 +21,7 @@ import {
   addParamsToUrl,
   SOURCE_ORIGIN_PARAM,
 } from '../../../src/url';
-import {user, rethrowAsync} from '../../../src/log';
+import {user, dev, rethrowAsync} from '../../../src/log';
 import {onDocumentReady} from '../../../src/document-ready';
 import {xhrFor} from '../../../src/xhr';
 import {toArray} from '../../../src/types';
@@ -469,4 +469,6 @@ export function installAmpForm(win) {
   });
 }
 
+dev().info('dev.info in amp-form this will work');
+user().info('user.info in amp-form this will throw');
 installAmpForm(AMP.win);
