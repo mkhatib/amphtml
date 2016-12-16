@@ -20,7 +20,7 @@ import {
   escapeCssSelectorIdent,
   isIframed,
 } from './dom';
-import {fromClassForDoc} from './service';
+import {fromClassForDoc, installServiceInEmbedScope} from './service';
 import {dev} from './log';
 import {historyForDoc} from './history';
 import {parseUrl} from './url';
@@ -42,15 +42,20 @@ export function installGlobalClickListenerForDoc(ampdoc) {
 /**
  * Intercept any click on the current document and prevent any
  * linking to an identifier from pushing into the history stack.
+ * @implements {../service.EmbeddableService}
  * @visibleForTesting
  */
 export class ClickHandler {
   /**
    * @param {!./service/ampdoc-impl.AmpDoc} ampdoc
+   * @param {(!Document|!ShadowRoot)=} opt_root
    */
-  constructor(ampdoc) {
+  constructor(ampdoc, opt_root) {
     /** @const {!./service/ampdoc-impl.AmpDoc} */
     this.ampdoc = ampdoc;
+
+    /** @const {!Document|!ShadowRoot} */
+    this.root_ = opt_root || this.ampdoc.getRootNode();
 
     /** @private @const {!./service/viewport-impl.Viewport} */
     this.viewport_ = viewportForDoc(this.ampdoc);
@@ -71,7 +76,13 @@ export class ClickHandler {
 
     /** @private @const {!function(!Event)|undefined} */
     this.boundHandle_ = this.handle_.bind(this);
-    this.ampdoc.getRootNode().addEventListener('click', this.boundHandle_);
+    this.root_.addEventListener('click', this.boundHandle_);
+  }
+
+  /** @override */
+  adoptEmbedWindow(embedWin) {
+    installServiceInEmbedScope(embedWin, 'clickhandler',
+        new ClickHandler(this.ampdoc, embedWin.document));
   }
 
   /**
@@ -79,7 +90,7 @@ export class ClickHandler {
    */
   cleanup() {
     if (this.boundHandle_) {
-      this.ampdoc.getRootNode().removeEventListener('click', this.boundHandle_);
+      this.root_.removeEventListener('click', this.boundHandle_);
     }
   }
 
@@ -91,8 +102,8 @@ export class ClickHandler {
    */
   handle_(e) {
     onDocumentElementClick_(
-        e, this.ampdoc, this.viewport_, this.history_, this.isIosSafari_,
-        this.isIframed_);
+        e, this.ampdoc, this.root_, this.viewport_, this.history_,
+        this.isIosSafari_, this.isIframed_);
   }
 }
 
@@ -106,31 +117,34 @@ export class ClickHandler {
  *
  * @param {!Event} e
  * @param {!./service/ampdoc-impl.AmpDoc} ampdoc
+ * @param {!Document|!ShadowRoot} root
  * @param {!./service/viewport-impl.Viewport} viewport
  * @param {!./service/history-impl.History} history
  * @param {boolean} isIosSafari
  * @param {boolean} isIframed
  */
 export function onDocumentElementClick_(
-    e, ampdoc, viewport, history, isIosSafari, isIframed) {
+    e, ampdoc, root, viewport, history, isIosSafari, isIframed) {
   if (e.defaultPrevented) {
     return;
   }
 
   const target = closestByTag(dev().assertElement(e.target), 'A');
+  // TODO(mkhatib): Probably need to limit closest result to contained doc.
   if (!target || !target.href) {
     return;
   }
-  urlReplacementsForDoc(ampdoc).maybeExpandLink(target);
+  // TODO(mkhatib, #6583): Expand this to work inside embeds.
+  urlReplacementsForDoc(target).maybeExpandLink(target);
 
   const tgtLoc = parseUrl(target.href);
   // Handle custom protocols only if the document is iframe'd.
   if (isIframed) {
-    handleCustomProtocolClick_(e, target, tgtLoc, ampdoc, isIosSafari);
+    handleCustomProtocolClick_(e, root, target, tgtLoc, ampdoc, isIosSafari);
   }
 
   if (tgtLoc.hash) {
-    handleHashClick_(e, tgtLoc, ampdoc, viewport, history);
+    handleHashClick_(e, root, tgtLoc, ampdoc, viewport, history);
   }
 }
 
@@ -144,7 +158,8 @@ export function onDocumentElementClick_(
  * @param {boolean} isIosSafari
  * @private
  */
-function handleCustomProtocolClick_(e, target, tgtLoc, ampdoc, isIosSafari) {
+function handleCustomProtocolClick_(e, target, tgtLoc, ampdoc,
+                                    isIosSafari) {
   /** @const {!Window} */
   const win = ampdoc.win;
   // On Safari iOS, custom protocol links will fail to open apps when the
@@ -171,13 +186,14 @@ function handleCustomProtocolClick_(e, target, tgtLoc, ampdoc, isIosSafari) {
 /**
  * Handles clicking on a link with hash navigation.
  * @param {!Event} e
+ * @param {!Document|!ShadowRoot} root
  * @param {!Location} tgtLoc
  * @param {!./service/ampdoc-impl.AmpDoc} ampdoc
  * @param {!./service/viewport-impl.Viewport} viewport
  * @param {!./service/history-impl.History} history
  * @private
  */
-function handleHashClick_(e, tgtLoc, ampdoc, viewport, history) {
+function handleHashClick_(e, root, tgtLoc, ampdoc, viewport, history) {
   /** @const {!Window} */
   const win = ampdoc.win;
   /** @const {!Location} */
@@ -203,10 +219,10 @@ function handleHashClick_(e, tgtLoc, ampdoc, viewport, history) {
 
   if (hash) {
     const escapedHash = escapeCssSelectorIdent(win, hash);
-    elem = (ampdoc.getRootNode().getElementById(hash) ||
+    elem = (root.getElementById(hash) ||
         // Fallback to anchor[name] if element with id is not found.
         // Linking to an anchor element with name is obsolete in html5.
-        ampdoc.getRootNode().querySelector(`a[name="${escapedHash}"]`));
+        root.querySelector(`a[name="${escapedHash}"]`));
   }
 
   // If possible do update the URL with the hash. As explained above
